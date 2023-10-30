@@ -1,0 +1,431 @@
+---
+title: "heatmap_new"
+output: html_document
+date: "2023-06-15"
+---
+
+---
+title: "Heat Map reconstruction"
+output: html_document
+date: "2023-06-14"
+---
+
+---
+title: "MIA-Brain Correlation Heat Map"
+author: "Eileen Shea"
+date: "May 5, 2021"
+output: 
+  html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(tidyverse)
+library(broom)
+library(gridExtra)
+```
+
+```{r}
+mia_il6 <- read.csv("/Users/yanfeng/Desktop/research/R code MIA Heatmap/MIA_IL6.csv")
+mia_crp <- read.csv("/Users/yanfeng/Desktop/research/R code MIA Heatmap/MIA_CRP.csv")
+```
+
+
+```{r, warning=FALSE}
+mia_il6_long = mia_il6 %>%
+  select(sub_id, log_il6_2, log_il6_3, FA_Point1:CR_Point9) %>% 
+  gather(trimester, log_il6, log_il6_2:log_il6_3) %>% 
+  mutate(trimester = substr(trimester, 9, 9)) %>% 
+  gather(point, value, FA_Point1:CR_Point9)
+
+mia_il6_nest = mia_il6_long %>% 
+  group_by(trimester, point) %>% 
+  nest()
+
+cor_fun <- function(df) cor.test(df$log_il6, df$value, method = "spearman") %>% tidy()
+
+mia_il6_nest <- mutate(mia_il6_nest, model = map(data, cor_fun))
+
+corr_il6 <- select(mia_il6_nest, -data) %>% unnest() %>% select(trimester, point, estimate)
+
+points <- c("FA_Point4", "FA_Point12", "FA_Point13", "FA_Point14", "FA_Point16", "FA_Point17", "FA_Point19", "CH_Point5", "CR_Point7", "CR_Point11", "CR_Point12", "NAA_Point14", "NAA_Point15", "NAA_Point16")
+
+corr_il6_tidy = corr_il6 %>% 
+  filter(point %in% points) %>% 
+  mutate(trimester = ifelse(trimester == 2, "2nd Trimester log(IL6)", "3rd Trimester log(IL6)"))
+
+corr_il6_tidy_w = corr_il6_tidy %>% 
+  pivot_wider(names_from = trimester, values_from = estimate) %>% 
+  mutate(Diff = `3rd Trimester log(IL6)` - `2nd Trimester log(IL6)`)
+
+corr_il6_fa_plot = corr_il6_tidy_w %>% 
+  filter(grepl("FA", point)) %>% 
+  pivot_longer(!point, names_to = "trimester", values_to = "estimate") %>% 
+  mutate(point = factor(point, levels = c("FA_Point4", "FA_Point12", "FA_Point13", "FA_Point14", "FA_Point16", "FA_Point17", "FA_Point19")),
+         trimester = factor(trimester, levels = c("2nd Trimester log(IL6)", "3rd Trimester log(IL6)", "Diff")),
+         estimate_fill =ifelse(trimester == "Diff", 0, estimate))
+  
+corr_il6_mrs_plot = corr_il6_tidy_w %>% 
+  filter(grepl("CR|CH|NAA", point)) %>% 
+  pivot_longer(!point, names_to = "trimester", values_to = "estimate") %>% 
+  mutate(point = factor(point, levels = c("CH_Point5", "CR_Point7", "CR_Point11", "CR_Point12", "NAA_Point14", "NAA_Point15", "NAA_Point16")),
+         trimester = factor(trimester, levels = c("2nd Trimester log(IL6)", "3rd Trimester log(IL6)", "Diff")),
+         estimate = ifelse(grepl("NAA", point), 0, estimate),
+         estimate_fill =ifelse(trimester == "Diff", 0, estimate))
+```
+
+
+# start to make the heat map
+```{r}
+il6_fa_heatmap <- ggplot() +
+  geom_raster(data = corr_il6_fa_plot,
+            aes(trimester, point, fill = estimate_fill))+
+  geom_text(data = corr_il6_fa_plot,
+            aes(trimester, point, label = round(estimate, 3), fontface ="plain"))+
+  scale_fill_gradient2(low = "dodgerblue3", mid = "white", high = "orangered3", breaks = seq(-1, 1, 0.2))+
+  scale_y_discrete(limits = rev(levels(corr_il6_fa_plot$point)), labels = c("Left superior temporal gyrus", "Posterior limb internal capsule (subcortical)", "Anterior region of corona radiata", "Amygdala", "Inferior temporal gyrus", "Thalamus", "Hippocampus")) +
+  scale_x_discrete(position = "top", labels = function(x) str_wrap(x, width = 13)) +
+  labs(x = "", y = "", fill = "") +
+  theme_minimal() +
+  theme(panel.grid.major = element_blank(), axis.text.x = element_text(face = "bold"), legend.position = "none")
+
+il6_mrs_heatmap <- ggplot() +
+  geom_raster(data = corr_il6_mrs_plot,
+            aes(trimester, point, fill = estimate_fill))+
+  geom_text(data = corr_il6_mrs_plot,
+            aes(trimester, point, label = round(estimate, 3), fontface ="plain", 
+                color = ifelse(estimate == 0, "white", "black"))) +
+  scale_fill_gradient2(low = "dodgerblue3", mid = "white", high = "orangered3", breaks = seq(-1, 1, 0.2))+
+  scale_y_discrete(limits = rev(levels(corr_il6_mrs_plot$point)), labels = c(" ", " ", " ", "Cingulate gyrus", "Anterior limb internal capsule", "     Posterior limb internal capsule (medial)", "Putamen")) +
+  scale_x_discrete(position = "top", labels = function(x) str_wrap(x, width = 13)) +
+  labs(x = "", y = "", fill = "") +
+  theme_minimal() +
+  theme(panel.grid.major = element_blank(), axis.text.x = element_text(face = "bold"), legend.position = "none") +
+  scale_color_identity()
+```
+
+
+```{r, warning=FALSE}
+mia_crp_long = mia_crp %>%
+  select(sub_id, log_CRP_2, log_CRP_3, FA_Point1:CR_Point9) %>% 
+  gather(trimester, log_CRP, log_CRP_2:log_CRP_3) %>% 
+  mutate(trimester = substr(trimester, 9, 9)) %>% 
+  gather(point, value, FA_Point1:CR_Point9)
+
+mia_crp_nest = mia_crp_long %>% 
+  group_by(trimester, point) %>% 
+  nest()
+
+cor_fun <- function(df) cor.test(df$log_CRP, df$value, method = "spearman") %>% tidy()
+
+mia_crp_nest <- mutate(mia_crp_nest, model = map(data, cor_fun))
+
+corr_crp <- select(mia_crp_nest, -data) %>% unnest() %>% select(trimester, point, estimate)
+
+points <- c("FA_Point4", "CH_Point4", "FA_Point1", "FA_Point2", "FA_Point3","FA_Point5", "FA_Point6", "FA_Point7", "NAA_Point12", "NAA_Point13", "NAA_Point14", "NAA_Point15", "NAA_Point16", "NAA_Point17")
+
+corr_crp_tidy = corr_crp %>% 
+  filter(point %in% points) %>% 
+  mutate(trimester = ifelse(trimester == 2, "2nd Trimester log(CRP)", "3rd Trimester log(CRP)"),
+         estimate = ifelse(point == "FA_Point4" | point == "CH_Point4", estimate, 0))
+
+corr_crp_tidy_w = corr_crp_tidy %>% 
+  pivot_wider(names_from = trimester, values_from = estimate) %>% 
+  mutate(Diff = `3rd Trimester log(CRP)` - `2nd Trimester log(CRP)`)
+
+corr_crp_fa_plot = corr_crp_tidy_w %>% 
+  filter(grepl("FA", point)) %>% 
+  pivot_longer(!point, names_to = "trimester", values_to = "estimate") %>% 
+  mutate(point = factor(point, levels = c("FA_Point4", "FA_Point1", "FA_Point2", "FA_Point3","FA_Point5", "FA_Point6", "FA_Point7")),
+         trimester = factor(trimester, levels = c("2nd Trimester log(CRP)", "3rd Trimester log(CRP)", "Diff")),
+         estimate_fill =ifelse(trimester == "Diff", 0, estimate))
+  
+corr_crp_mrs_plot = corr_crp_tidy_w %>% 
+  filter(grepl("CH|NAA", point)) %>% 
+  pivot_longer(!point, names_to = "trimester", values_to = "estimate") %>% 
+  mutate(point = factor(point, levels = c("CH_Point4", "NAA_Point12", "NAA_Point13", "NAA_Point14", "NAA_Point15", "NAA_Point16", "NAA_Point17")),
+         trimester = factor(trimester, levels = c("2nd Trimester log(CRP)", "3rd Trimester log(CRP)", "Diff")),
+         estimate_fill =ifelse(trimester == "Diff", 0, estimate))
+```
+
+```{r}
+crp_fa_heatmap <- ggplot() +
+  geom_raster(data = corr_crp_fa_plot,
+            aes(trimester, point, fill = estimate_fill)) +
+  geom_text(data = corr_crp_fa_plot,
+            aes(trimester, point, label = round(estimate, 3), 
+                fontface ="plain", 
+                color = ifelse(estimate == 0, "white", "black"))) +
+  scale_fill_gradient2(low = "dodgerblue3", mid = "white", high = "orangered3", breaks = seq(-1, 1, 0.2)) +
+  scale_y_discrete(limits = rev(levels(corr_crp_fa_plot$point)), labels = c(" ", " ", " ", " ", " ", " ", "Fusiform gyrus")) +
+  scale_x_discrete(position = "top", labels = function(x) str_wrap(x, width = 13)) +
+  labs(x = "", y = "", fill = "") +
+  theme_minimal() +
+  theme(panel.grid.major = element_blank(), axis.text.x = element_text(face = "bold"), legend.position = "none") + 
+  scale_color_identity()
+
+crp_mrs_heatmap <- ggplot() +
+  geom_raster(data = corr_crp_mrs_plot,
+            aes(trimester, point, fill = estimate_fill))+
+  geom_text(data = corr_crp_mrs_plot,
+            aes(trimester, point, label = round(estimate, 3), fontface ="plain", color = ifelse(estimate == 0, "white", "black"))) +
+  scale_fill_gradient2(low = "dodgerblue3", mid = "white", high = "orangered3", breaks = seq(-1, 1, 0.2))+
+  scale_y_discrete(limits = rev(levels(corr_crp_mrs_plot$point)), labels = c(" ", " ", " ", " ", " ", " ", "Insula")) +
+  scale_x_discrete(position = "top", labels = function(x) str_wrap(x, width = 13)) +
+  labs(x = "", y = "", fill = "") +
+  theme_minimal() +
+  theme(panel.grid.major = element_blank(), axis.text.x = element_text(face = "bold"), legend.position = "none") +
+  scale_color_identity()
+```
+
+## DTI-FA Plot
+```{r}
+corr_crp_fa_plot2 = corr_crp_fa_plot %>% 
+  filter(point == "FA_Point4")
+
+all_fa_corrs <- rbind(corr_il6_fa_plot, corr_crp_fa_plot2)
+
+get_legend<-function(myggplot){
+  tmp <- ggplot_gtable(ggplot_build(myggplot))
+  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  legend <- tmp$grobs[[leg]]
+  return(legend)
+}
+
+leg_plot <- ggplot() +
+  geom_raster(data = all_fa_corrs,
+            aes(trimester, point, fill = estimate))+
+  geom_text(data = all_fa_corrs,
+            aes(trimester, point, label = round(estimate, 3),
+            fontface ="plain"))+
+  scale_fill_gradient2(low = "dodgerblue3", mid = "white", high = "orangered3", breaks = seq(-1, 1, 0.2))+
+  scale_x_discrete(position = "top", labels = function(x) str_wrap(x, width = 12)) +
+  labs(x = "", y = "", fill = "")+
+  theme_minimal()+
+  theme(panel.grid.major = element_blank(), axis.text.x = element_text(face = "bold"))
+
+fa_legend <- get_legend(leg_plot)
+```
+
+```{r, fig.width = 10, fig.height = 3}
+grid.arrange(il6_fa_heatmap, crp_fa_heatmap, fa_legend, ncol=3, widths=c(5.8, 4.2, 0.8))
+```
+
+
+## MRS Plot
+```{r}
+corr_il6_mrs_plot2 = corr_il6_mrs_plot %>% 
+  filter(estimate != 0)
+
+corr_crp_mrs_plot2 = corr_crp_mrs_plot %>% 
+  filter(estimate != 0)
+
+all_mrs_corrs <- rbind(corr_il6_mrs_plot2, corr_crp_mrs_plot2)
+
+get_legend<-function(myggplot){
+  tmp <- ggplot_gtable(ggplot_build(myggplot))
+  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  legend <- tmp$grobs[[leg]]
+  return(legend)
+}
+
+leg_plot <- ggplot() +
+  geom_raster(data = all_mrs_corrs,
+            aes(trimester, point, fill = estimate))+
+  geom_text(data = all_mrs_corrs,
+            aes(trimester, point, label = round(estimate, 3),
+            fontface ="plain"))+
+  scale_fill_gradient2(low = "dodgerblue3", mid = "white", high = "orangered3", breaks = seq(-1, 1, 0.2))+
+  scale_x_discrete(position = "top", labels = function(x) str_wrap(x, width = 12)) +
+  labs(x = "", y = "", fill = "")+
+  theme_minimal()+
+  theme(panel.grid.major = element_blank(), axis.text.x = element_text(face = "bold"))
+
+mrs_legend <- get_legend(leg_plot)
+```
+
+```{r, fig.width = 9.4, fig.height = 3}
+grid.arrange(il6_mrs_heatmap, crp_mrs_heatmap, mrs_legend, ncol=3, widths=c(5.5, 3.5, 0.8))
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+
+
+
+
+
+
+# new part!!!
+```{r}
+corr_il6_fa_plot_new <- read.csv("/Users/yanfeng/Desktop/research/R code MIA Heatmap/corr_il6_fa_plot_new.csv")
+```
+
+# start to make DTI-FA plot (data preparation)
+```{r}
+il6_fa_heatmap_new <- ggplot() +
+  geom_raster(data = corr_il6_fa_plot_new,
+            aes(trimester, point, fill = estimate_fill))+
+  geom_text(data = corr_il6_fa_plot_new,
+            aes(trimester, point, label = round(estimate, 3), fontface ="plain"))+
+  scale_fill_gradient2(low = "dodgerblue3", mid = "white", high = "orangered3", breaks = seq(-1, 1, 0.2),limits=c(-1,1))+
+  scale_y_discrete(limits = rev(levels(corr_il6_fa_plot$point)), labels = c("Left superior temporal gyrus", "Posterior limb internal capsule (subcortical)", "Anterior region of corona radiata", "Amygdala", "Inferior temporal gyrus", "Thalamus", "Hippocampus")) +
+  scale_x_discrete(position = "top", labels = function(x) str_wrap(x, width = 13)) +
+  labs(x = "", y = "", fill = "") +
+  theme_minimal() +
+  theme(panel.grid.major = element_blank(), axis.text.x = element_text(face = "bold"), legend.position = "none")+
+  coord_fixed(ratio=0.3)
+
+```
+
+```{r}
+corr_crp_fa_plot_new <- read.csv("/Users/yanfeng/Desktop/research/R code MIA Heatmap/corr_crp_fa_plot_new.csv")
+```
+
+```{r}
+crp_fa_heatmap_new <- ggplot() +
+  geom_raster(data = corr_crp_fa_plot_new,
+            aes(trimester, point, fill = estimate_fill)) +
+  geom_text(data = corr_crp_fa_plot_new,
+            aes(trimester, point, label = round(estimate, 3), 
+                fontface ="plain", 
+                color = ifelse(estimate == 0, "white", "black"))) +
+  scale_fill_gradient2(low = "dodgerblue3", mid = "white", high = "orangered3", breaks = seq(-1, 1, 0.2),limits=c(-1,1)) +
+  scale_y_discrete(limits = rev(levels(corr_crp_fa_plot$point)), labels = c(" ", " ", " ", " ", " ", " ", "Fusiform gyrus")) +
+  scale_x_discrete(position = "top", labels = function(x) str_wrap(x, width = 13)) +
+  labs(x = "", y = "", fill = "") +
+  theme_minimal() +
+  theme(panel.grid.major = element_blank(), axis.text.x = element_text(face = "bold"), legend.position = "none") + 
+  scale_color_identity()+
+  guides(fill = guide_colorbar(barwidth = 10, barheight = 0.5, direction = "horizontal", keyheight = unit(0.01, "cm"), keywidth = unit(3, "cm")))+  # Adjust the barwidth and barheight
+  theme(legend.direction = "horizontal",  # Set the legend orientation to horizontal
+        legend.position = "bottom") + coord_fixed(ratio=0.3)     # Set the legend position to the bottom
+```
+
+
+```{r}
+all_fa_corrs_new <- read.csv("/Users/yanfeng/Desktop/research/R code MIA Heatmap/all_fa_corrs_new.csv")
+```
+
+```{r}
+leg_plot <- ggplot() +
+  geom_raster(data = all_fa_corrs_new,
+            aes(trimester, point, fill = estimate))+
+  geom_text(data = all_fa_corrs_new,
+            aes(trimester, point, label = round(estimate, 3),
+            fontface ="plain"))+
+  scale_fill_gradient2(low = "dodgerblue3", mid = "white", high = "orangered3", breaks = seq(-1, 1, 0.2),limits=c(-1,1))+
+  scale_x_discrete(position = "top", labels = function(x) str_wrap(x, width = 12)) +
+  labs(x = "", y = "", fill = "")+
+  theme_minimal()+
+  theme(panel.grid.major = element_blank(), axis.text.x = element_text(face = "bold"))+
+  coord_fixed(ratio=0.3)
+
+fa_legend_new <- get_legend(leg_plot)
+```
+
+#DTI-FA PLOT
+```{r, fig.width = 10, fig.height = 3}
+grid.arrange(il6_fa_heatmap_new, crp_fa_heatmap_new, fa_legend_new, ncol=3, widths=c(5.0, 4.0, 2.0))
+```
+
+
+
+
+
+
+# start to make MRS plot (data preparation)
+```{r}
+corr_il6_mrs_plot_new <- read.csv("/Users/yanfeng/Desktop/research/R code MIA Heatmap/corr_il6_mrs_plot_new.csv")
+```
+
+```{r}
+il6_mrs_heatmap_new <- ggplot() +
+  geom_tile(data = corr_il6_mrs_plot_new,
+            aes(trimester, point, fill = estimate_fill))+
+  geom_tile(width = 0.5, height = 0.01) +
+  geom_text(data = corr_il6_mrs_plot_new,
+            aes(trimester, point, label = round(estimate, 3), fontface ="plain", 
+                color = ifelse(estimate == 0, "white", "black"))) +
+  scale_fill_gradient2(low = "dodgerblue3", mid = "white", high = "orangered3", breaks = seq(-1, 1, 0.2), limits = c(-1, 1), 
+                       guide = guide_colorbar(barwidth = 0.1, barheight = 1, keyheight = unit(0.5, "cm"), keywidth = unit(1, "cm")))+
+  scale_y_discrete(limits = rev(levels(corr_il6_mrs_plot$point)), labels = c(" ", " ", " ", "Cingulate gyrus", "Anterior limb internal capsule", "     Posterior limb internal capsule (medial)", "Putamen")) +
+  scale_x_discrete(position = "top", labels = function(x) str_wrap(x, width = 10)) +
+  labs(x = "", y = "", fill = "") +
+  theme_minimal() +
+  theme(panel.grid.major = element_blank(), axis.text.x = element_text(face = "bold"), legend.position = "none") +
+  scale_color_identity()+
+  coord_fixed(ratio=0.3)
+
+il6_mrs_heatmap_new <- il6_mrs_heatmap_new +
+  guides(fill = guide_colorbar(barwidth = 10, barheight = 0.1))
+
+```
+
+```{r}
+corr_crp_mrs_plot_new <- read.csv("/Users/yanfeng/Desktop/research/R code MIA Heatmap/corr_crp_mrs_plot_new.csv")
+```
+
+```{r}
+crp_mrs_heatmap_new <- ggplot() +
+  geom_tile(data = corr_crp_mrs_plot_new,
+            aes(trimester, point, fill = estimate_fill))+
+  geom_tile(width = 0.5, height = 0.01) +
+  geom_text(data = corr_crp_mrs_plot_new,
+            aes(trimester, point, label = round(estimate, 3), fontface ="plain", color = ifelse(estimate == 0, "white", "black"))) +
+  scale_fill_gradient2(low = "dodgerblue3", mid = "white", high = "orangered3", breaks = seq(-1, 1, 0.2), limits = c(-1, 1), 
+                       guide = guide_colorbar(barwidth = 0.1, barheight = 1, keyheight = unit(0.5, "cm"), keywidth = unit(1, "cm")))+
+  scale_y_discrete(limits = rev(levels(corr_crp_mrs_plot$point)), labels = c(" ", " ", " ", " ", " ", " ", "Insula")) +
+  scale_x_discrete(position = "top", labels = function(x) str_wrap(x, width = 10)) +
+  labs(x = "", y = "", fill = "") +
+  theme_minimal() +
+  theme(panel.grid.major = element_blank(), axis.text.x = element_text(face = "bold"), legend.position = "none") +
+  scale_color_identity()+
+  guides(fill = guide_colorbar(barwidth = 10, barheight = 0.5, direction = "horizontal", keyheight = unit(0.01, "cm"), keywidth = unit(3, "cm")))+  # Adjust the barwidth and barheight
+  theme(legend.direction = "horizontal",  # Set the legend orientation to horizontal
+        legend.position = "bottom")  +
+  coord_fixed(ratio=0.3)    # Set the legend position to the bottom
+
+crp_mrs_heatmap_new <- crp_mrs_heatmap_new +
+  guides(fill = guide_colorbar(barwidth = 10, barheight = 0.1))
+```
+
+```{r}
+all_mrs_corrs_new <- read.csv("/Users/yanfeng/Desktop/research/R code MIA Heatmap/all_mrs_corrs_new.csv")
+```
+
+```{r}
+leg_plot <- ggplot() +
+  geom_tile(data = all_mrs_corrs_new,
+            aes(trimester, point, fill = estimate))+
+  geom_tile(width = 0.5, height = 0.01) +
+  geom_text(data = all_mrs_corrs_new,
+            aes(trimester, point, label = round(estimate, 3),
+            fontface ="plain"))+
+  scale_fill_gradient2(low = "dodgerblue3", mid = "white", high = "orangered3", breaks = seq(-1, 1, 0.2), limits = c(-1, 1), 
+                       guide = guide_colorbar(barwidth = 0.1, barheight = 1, keyheight = unit(0.5, "cm"), keywidth = unit(1, "cm")))+
+  scale_x_discrete(position = "top", labels = function(x) str_wrap(x, width = 10)) +
+  labs(x = "", y = "", fill = "")+
+  theme_minimal()+
+  theme(panel.grid.major = element_blank(), axis.text.x = element_text(face = "bold"))+
+  guides(fill = guide_colorbar(barwidth = 10, barheight = 0.5, direction = "horizontal", keyheight = unit(0.01, "cm"), keywidth = unit(3, "cm")))+  # Adjust the barwidth and barheight
+  theme(legend.direction = "horizontal",  # Set the legend orientation to horizontal
+        legend.position = "bottom")  +
+  coord_fixed(ratio=0.3)    # Set the legend position to the bottom
+
+
+mrs_legend_new <- get_legend(leg_plot)
+```
+
+```{r}
+grid.arrange(il6_mrs_heatmap_new, crp_mrs_heatmap_new, mrs_legend_new, ncol=3, widths=c(5.0, 4.0, 2.0))
+```
